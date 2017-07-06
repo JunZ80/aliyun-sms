@@ -60,7 +60,7 @@ module Aliyun
                  body: post_body_data(configuration.access_key_secret, sms_params))
         
         result_json = result res.body
-        result_json["error_response"]["phones"] = phones if result_json["error_response"]
+        result_json["error_response"]["phone"] = mobile_num if result_json["error_response"]
         results.push(result_json)
         errors = results.select{ |r| r["error_response"] }
         if errors.any?
