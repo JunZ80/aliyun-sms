@@ -53,10 +53,21 @@ module Aliyun
       end
 
       def send(mobile_num, template_code, message_param)
+        results = []
         sms_params = create_params(mobile_num, template_code, message_param)
-        Typhoeus.post("https://sms.aliyuncs.com/",
+        res = Typhoeus.post("https://sms.aliyuncs.com/",
                  headers: {'Content-Type'=> "application/x-www-form-urlencoded"},
                  body: post_body_data(configuration.access_key_secret, sms_params))
+        
+        result_json = result res.body
+        result_json["error_response"]["phones"] = phones if result_json["error_response"]
+        results.push(result_json)
+        errors = results.select{ |r| r["error_response"] }
+        if errors.any?
+          return { success: false, errors: errors }
+        else
+          return { success: true }
+        end
       end
 
       # 原生参数拼接成请求字符串
@@ -111,6 +122,18 @@ module Aliyun
       # 生成短信唯一标识码，采用到微秒的时间戳
       def seed_signature_nonce
         Time.now.utc.strftime("%Y%m%d%H%M%S%L")
+      end
+      
+      def result body
+        begin
+          JSON.parse body
+        rescue => e
+          {
+            code: 502,
+            msg: "内容解析错误",
+            detail: e.to_s
+          }
+        end
       end
 
     end
