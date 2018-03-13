@@ -55,7 +55,7 @@ module Aliyun
       def send(mobile_num, template_code, message_param)
         results = []
         sms_params = create_params(mobile_num, template_code, message_param)
-        res = Typhoeus.post("https://sms.aliyuncs.com/",
+        res = Typhoeus.post("https://dysmsapi.aliyuncs.com/",
                  headers: {'Content-Type'=> "application/x-www-form-urlencoded"},
                  body: post_body_data(configuration.access_key_secret, sms_params))
         
