@@ -1,7 +1,7 @@
 require "aliyun/sms/version"
 require "openssl"
 require "base64"
-require "typhoeus"
+require 'typhoeus'
 require "erb"
 include ERB::Util
 
@@ -9,7 +9,8 @@ module Aliyun
   module Sms
     class Configuration
       attr_accessor :access_key_secret, :access_key_id, :action, :format, :region_id,
-                    :sign_name, :signature_method, :signature_version, :sms_version
+                    :sign_name, :signature_method, :signature_version, :version
+
       def initialize
         @access_key_secret = ''
         @access_key_id = ''
@@ -19,7 +20,7 @@ module Aliyun
         @sign_name = ''
         @signature_method = ''
         @signature_version = ''
-        @sms_version = ''
+        @version = ''
       end
     end
 
@@ -34,79 +35,59 @@ module Aliyun
         yield(configuration)
       end
 
-      def create_params(mobile_num, template_code, message_param)
-        sms_params ={
+      def send(phone_numbers, template_code, template_param, out_id = '')
+        Typhoeus.get(get_url({
+          'PhoneNumbers' => phone_numbers,
+          'TemplateCode' => template_code,
+          'TemplateParam' => template_param,
+          'OutId'	=> out_id,
+          'SignatureNonce' => seed_signature_nonce,
+          'Timestamp' => seed_timestamp
+          }))
+      end
+
+      def get_url(user_params)
+        params = get_params(user_params)
+        coded_params = canonicalized_query_string(params)
+        key_secret = configuration.access_key_secret
+        url = 'http://dysmsapi.aliyuncs.com/?' + 'Signature=' + sign(key_secret, coded_params) + '&' + coded_params
+      end
+
+      def get_params(user_params)
+        params = config_params.merge(user_params)
+      end
+
+      def config_params()
+        params ={
           'AccessKeyId' => configuration.access_key_id,
           'Action' => configuration.action,
           'Format' => configuration.format,
-          'TemplateParam' => message_param,
-          'PhoneNumbers' => mobile_num,
           'RegionId' => configuration.region_id,
           'SignName' => configuration.sign_name,
           'SignatureMethod' => configuration.signature_method,
-          'SignatureNonce' => seed_signature_nonce,
           'SignatureVersion' => configuration.signature_version,
-          'TemplateCode' => template_code,
-          'Timestamp' => seed_timestamp,
-          'Version' => configuration.sms_version
+          'Version' => configuration.version
         }
       end
 
-      def send(mobile_num, template_code, message_param)
-        results = []
-        sms_params = create_params(mobile_num, template_code, message_param)
-        res = Typhoeus.post("https://dysmsapi.aliyuncs.com/",
-                 headers: {'Content-Type'=> "application/x-www-form-urlencoded"},
-                 body: post_body_data(configuration.access_key_secret, sms_params))
-        
-        result_json = result res.body
-        result_json["error_response"]["phone"] = mobile_num if result_json["error_response"]
-        results.push(result_json)
-        errors = results.select{ |r| r["error_response"] }
-        if errors.any?
-          return { success: false, errors: errors }
-        else
-          return { success: true }
-        end
-      end
-
-      # 原生参数拼接成请求字符串
-      def query_string(params)
-        qstring = ''
-        params.each do |key, value|
-          if qstring.empty?
-            qstring += "#{key}=#{value}"
-          else
-            qstring += "&#{key}=#{value}"
-          end
-        end
-        return qstring
-      end
-
-      # 原生参数经过2次编码拼接成标准字符串
       def canonicalized_query_string(params)
         cqstring = ''
-        params.each do |key, value|
+        params.sort_by{|key, val| key}.each do |key, value|
           if cqstring.empty?
             cqstring += "#{encode(key)}=#{encode(value)}"
           else
             cqstring += "&#{encode(key)}=#{encode(value)}"
           end
         end
-        return encode(cqstring)
+        cqstring
       end
 
       # 生成数字签名
-      def sign(key_secret, params)
+      def sign(key_secret, coded_params)
         key = key_secret + '&'
-        signature = 'POST' + '&' + encode('/') + '&' + canonicalized_query_string(params)
+        signature = 'GET' + '&' + encode('/') + '&' +  encode(coded_params)
         sign = Base64.encode64("#{OpenSSL::HMAC.digest('sha1',key, signature)}")
         encode(sign.chomp)  # 通过chomp去掉最后的换行符 LF
-      end
-
-      # 组成附带签名的 POST 方法的 BODY 请求字符串
-      def post_body_data(key_secret, params)
-        body_data = 'Signature=' + sign(key_secret, params) + '&' + query_string(params)
       end
 
       # 对字符串进行 PERCENT 编码
@@ -123,20 +104,21 @@ module Aliyun
       def seed_signature_nonce
         Time.now.utc.strftime("%Y%m%d%H%M%S%L")
       end
-      
-      def result body
-        begin
-          JSON.parse body
-        rescue => e
-          {
-            code: 502,
-            msg: "内容解析错误",
-            detail: e.to_s
-          }
+
+      # 测试参数未编码时生成的字符串是否正确（多一道保险）
+      def test_query_string(params)
+        qstring = ''
+        params.sort_by{|key, val| key}.each do |key, value|
+          if qstring.empty?
+            qstring += "#{key}=#{value}"
+          else
+            qstring += "&#{key}=#{value}"
+          end
         end
+        qstring
       end
 
     end
-    
+
   end
 end
